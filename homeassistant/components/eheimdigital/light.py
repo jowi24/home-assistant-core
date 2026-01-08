@@ -4,7 +4,7 @@ from typing import Any
 
 from eheimdigital.classic_led_ctrl import EheimDigitalClassicLEDControl
 from eheimdigital.device import EheimDigitalDevice
-from eheimdigital.types import LightMode
+from eheimdigital.types import EheimDigitalDataMissingError, LightMode
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -44,7 +44,11 @@ async def async_setup_entry(
         for device in device_address.values():
             if isinstance(device, EheimDigitalClassicLEDControl):
                 for channel in range(2):
-                    if len(device.tankconfig[channel]) > 0:
+                    # Check if channel exists and has configuration
+                    if (
+                        channel < len(device.tankconfig)
+                        and len(device.tankconfig[channel]) > 0
+                    ):
                         entities.append(
                             EheimDigitalClassicLEDControlLight(
                                 coordinator, device, channel
@@ -85,7 +89,12 @@ class EheimDigitalClassicLEDControlLight(
     @property
     def available(self) -> bool:
         """Return whether the entity is available."""
-        return super().available and self._device.light_level[self._channel] is not None
+        if not super().available:
+            return False
+        try:
+            return self._device.light_level[self._channel] is not None
+        except (EheimDigitalDataMissingError, IndexError):
+            return False
 
     @exception_handler
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -105,7 +114,11 @@ class EheimDigitalClassicLEDControlLight(
         await self._device.turn_off(self._channel)
 
     def _async_update_attrs(self) -> None:
-        light_level = self._device.light_level[self._channel]
+        try:
+            light_level = self._device.light_level[self._channel]
+        except (EheimDigitalDataMissingError, IndexError):
+            # Data not yet available or channel doesn't exist, keep previous state
+            return
 
         self._attr_is_on = light_level > 0 if light_level is not None else None
         self._attr_brightness = (
